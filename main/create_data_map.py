@@ -28,6 +28,15 @@ def make_request_and_edit_query_until_success(query_string):
 
     return parsed_response
 
+def get_counts_of_non_null_field_values(object_name, fields):
+    return make_request_and_edit_query_until_success(soql.get_count_of_fields_values(object_name, fields))
+
+def get_most_common_values_in_field(object_name, field):
+    return query.run_query_using_requests(soql.get_most_common_values(object_name, field))
+
+def get_most_recent_created_date_in_field(object_name, field):
+    return query.run_query_using_requests(soql.get_last_created_with_field(object_name, field))
+
 def get_results_to_return(object_ids_to_object_names, object_to_fields):
     pd_object_to_fields = pd.DataFrame(object_to_fields.items(), index=object_to_fields.keys(), columns=['SObjectId', 'FieldName']).explode('FieldName')
     object_ids = object_to_fields.keys()
@@ -37,19 +46,21 @@ def get_results_to_return(object_ids_to_object_names, object_to_fields):
     for object_id in object_ids:
         fields = object_to_fields[object_id]
         object_name = object_ids_to_object_names[object_id]
-        counts_of_non_null_field_values = make_request_and_edit_query_until_success(soql.get_count_of_fields_values(object_name, fields))
+
+        counts_of_non_null_field_values = get_counts_of_non_null_field_values(object_name, fields)
         if counts_of_non_null_field_values['hasError']:
             continue
         else:
             count_values = list(counts_of_non_null_field_values['records'][0].values())[1:] if len(list(counts_of_non_null_field_values['records'][0].values())) > 0 else 0
             if sum(count_values) == 0:
                 continue
+
             query_fields = re.findall(r'COUNT\((.*?)\)', counts_of_non_null_field_values['queryString'])
             for idx, field in enumerate(query_fields):
                 results_to_return = update_results(results_to_return, field, 'Count', count_values[idx])
 
         for field in fields:
-            most_common_values_in_field = query.run_query_using_requests(soql.get_most_common_values(object_name, field))
+            most_common_values_in_field = get_most_common_values_in_field(object_name, field)
             if most_common_values_in_field['records']:
                 most_common_values = set()
                 for i in range(len(fields)):
@@ -59,7 +70,8 @@ def get_results_to_return(object_ids_to_object_names, object_to_fields):
                     results_to_return = update_results(results_to_return, field, 'MostCommonValues', most_common_values)
                 except ValueError as e:
                     print(most_common_values)
-            most_recent_created_date_in_field = query.run_query_using_requests(soql.get_last_created_with_field(object_name, field))
+
+            most_recent_created_date_in_field = get_most_recent_created_date_in_field(object_name, field)
             if most_recent_created_date_in_field['records']:
                 created_date = most_recent_created_date_in_field['records'][0]['CreatedDate']
                 results_to_return = update_results(results_to_return, field, 'DateOfLastValue', created_date)
