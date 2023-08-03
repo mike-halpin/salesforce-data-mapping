@@ -1,13 +1,9 @@
 import os
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-import re
 import pandas as pd
-from simple_salesforce import format_soql
-import analysis.dataframe as dataframe
-import utilities.format as format
-import salesforce.api.query as query
-import salesforce.soql.soql as soql
+import salesforce.query as query
+import salesforce.soql as soql
 import salesforce.log_config as log_config
 
 # Initialize logging.
