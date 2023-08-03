@@ -1,9 +1,19 @@
 """
-Original Source: https://github.com/github/gitignore/blob/main/Python.gitignore
+Adapted from original source: https://github.com/github/gitignore/blob/main/Python.gitignore
 """
 # Omissions in original source.
 *\.DS_Store
+*.csv
+*\.github
+*\.bak
+*\.vscode
 
+# sfdx
+sfdx-project.json
+
+
+# Jetbrains 
+.idea/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
