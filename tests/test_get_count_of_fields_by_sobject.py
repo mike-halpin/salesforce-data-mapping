@@ -1,7 +1,7 @@
 import os
 import unittest
 from unittest.mock import patch, Mock
-import utilities.query as query
+import salesforce.query as query
 
 class TestGetCountOfSobjectFields(unittest.TestCase):
     def setUp(self):

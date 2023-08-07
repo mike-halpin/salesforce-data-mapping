@@ -24,13 +24,13 @@ def save_datamap_deprecated(df,object_id, fields, axis1_name, value):
 
 def save_datamap(df, object_id, axis1_name, fields_and_values):
     # Logt
-    logger.debug('Saving datamap for object_id: %s', object_id)
-    logger.trace('Fields and values: %s', fields_and_values) 
+    logger.info('Saving datamap for object_id: %s', object_id)
+    logger.debug('Fields and values: %s', fields_and_values) 
     # Turn the updates into a DataFrame
     updates_df = pd.DataFrame.from_records([fields_and_values]).transpose().reset_index().rename(columns={'index': 'FieldName'})
     # Log
-    logger.trace('Updates DataFrame head: %s', updates_df.head(5))
-    logger.trace('Updates DataFrame tail: %s', updates_df.tail(5))
+    logger.debug('Updates DataFrame head: %s', updates_df.head(5))
+    logger.debug('Updates DataFrame tail: %s', updates_df.tail(5))
     
     updates_df = updates_df.rename(columns={0: axis1_name})
     updates_df['SObjectId'] = object_id
