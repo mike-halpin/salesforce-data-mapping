@@ -22,32 +22,110 @@ def save_datamap_deprecated(df,object_id, fields, axis1_name, value):
     df.to_csv('data_map.csv', index=False)
     return df
 
-def save_datamap(df, object_id, axis1_name, fields_and_values):
-    # Logt
-    logger.info('Saving datamap for object_id: %s', object_id)
-    logger.debug('Fields and values: %s', fields_and_values) 
+def create_dataframe_from_common_values(field_name, object_id, values_and_counts, axis1_name='MostCommonValues'):
+    """
+    Creates a DataFrame from a dictionary of field and common values.
+
+    Args:
+    - field_name (str): Name of the field being processed.
+    - object_id (str): Id of the object being processed.
+    - values_and_counts (dict): Dictionary containing field name as key and list of [value, count] pairs.
+    - axis1_name (str, optional): Base name for DataFrame columns. Defaults to 'MostCommonValues'.
+
+    Returns:
+    - DataFrame: DataFrame populated with most common values and their counts.
+    """
+    logger.debug('Creating DataFrame from common values for field: %s', field_name)
+    logger.debug('Fields and values: %s', values_and_counts)
+
+    columns = ['SObjectId', 'FieldName']  # These are the two main columns across this component.
+    for i in range(1, 4):  # We only need to count to 3, but we need a better solution for this.
+        columns.append(axis1_name + str(i))
+        columns.append(axis1_name + str(i) + 'Count')
+
+    df = pd.DataFrame(columns=columns)  # Create the DataFrame with the new columns.
+    if field_name in values_and_counts:
+        for index, (value, count) in enumerate(values_and_counts[field_name], start=1):
+            df[axis1_name + str(index)] = [value]
+            df[axis1_name + str(index) + 'Count'] = [count]
+            if index == 3:  # We only need top 3
+                break
+        if not df.empty:
+            df['SObjectId'] = object_id
+            df['FieldName'] = field_name
+    else:
+        logger.debug(f'Empty input?? {field_name} not in {values_and_counts}')
+        assert list(values_and_counts.values()) == 0
+        assert list(values_and_counts.keys()) == 0
+
+    logger.debug('Updates DataFrame head: %s', df.head(5))
+    logger.debug('Updates DataFrame tail: %s', df.tail(5))
+
+    return df
+
+def create_dataframe_from_recent_date(field_name, value, axis1_name='DateOfLastValue'):
+    # Log
+    logger.debug('Creating DataFrame for field: %s', field_name)
+    logger.debug('Value is: %s', value)
+    # Turn the updates into a DataFrame
+    updates_df = pd.DataFrame.from_records({field_name: value}).transpose().reset_index().rename(columns={'index': 'FieldName'})
+    # Log
+    logger.debug('Updates DataFrame head: %s', updates_df.head(5))
+    logger.debug('Updates DataFrame tail: %s', updates_df.tail(5))
+    updates_df = updates_df.rename(columns={0: axis1_name})
+    return updates_df
+
+def create_dataframe_from_value_counts(fields_and_values, axis1_name='CountOfNonNullValues'):
+    # Log
+    logger.debug(f'Creating DataFrame for {axis1_name}: {fields_and_values}')
     # Turn the updates into a DataFrame
     updates_df = pd.DataFrame.from_records([fields_and_values]).transpose().reset_index().rename(columns={'index': 'FieldName'})
     # Log
     logger.debug('Updates DataFrame head: %s', updates_df.head(5))
     logger.debug('Updates DataFrame tail: %s', updates_df.tail(5))
-    
     updates_df = updates_df.rename(columns={0: axis1_name})
-    updates_df['SObjectId'] = object_id
-    update_suffix = '_update'
-    axis1_name_updated = axis1_name + update_suffix
-    # Merge the updates into the original DataFrame
-    df = pd.merge(df, updates_df, on=['SObjectId', 'FieldName'], how='left', suffixes=('', update_suffix))
+    return updates_df
 
-    # Use the updated values where they exist
-    # df[axis1_name] = df[axis1_name_updated].where(df[axis1_name_updated].notna(), df[axis1_name])
-
-    # Drop the update columns
-    # df = df.drop(columns=[axis1_name_updated])
-
-    df.to_csv('data_map.csv', index=False)
+def save_datamap(df):
+    if len(df.columns) > 11:
+        logger.debug('Trying to reproduce bug')
+    df.to_csv('data_map_14.csv', index=False)
     return df
 
+
+def merge_dataframes_for_datamap(df, to_merge, object_id, column_names):
+    to_merge['SObjectId'] = object_id
+    update_suffix = '_update'
+    # Merge the updates into the original DataFrame
+    df['SObjectId'] = df['SObjectId'].astype(str)
+    df['FieldName'] = df['FieldName'].astype(str)
+    to_merge['SObjectId'] = to_merge['SObjectId'].astype(str)
+    to_merge['FieldName'] = to_merge['FieldName'].astype(str)
+    for column in column_names:
+        try:
+            df = pd.merge(df, to_merge, on=['SObjectId', 'FieldName'], how='left', suffixes=('', update_suffix))
+            try:
+                df[column] = df[column + update_suffix].where(df[column + update_suffix].notna(), df[column])
+                logger.info('Merged updates into original DataFrame for field: %s', column)
+            except KeyError as e:
+                logger.debug(f'Nothing was merged, so column does not exist. {e}')
+            except ValueError as e:
+                logger.debug(f'Nothing was merged, so column does not exist. {e}')
+        except pd.errors.MergeError as e:
+            logger.error(f'Error merging updates into original DataFrame, {e}')
+            logger.warning('Skipping this field. Final data map won\'t include it.')
+
+            # Use the updated values where they exist
+            # df[axis1_name] = df[axis1_name_updated].where(df[axis1_name_updated].notna(), df[axis1_name])
+
+            # Drop the update columns
+            # df = df.drop(columns=[axis1_name_updated])
+    logger.debug('Updates DataFrame head: %s', to_merge.head(5))
+    logger.debug('Updates DataFrame tail: %s', to_merge.tail(5))
+    logger.debug('Original DataFrame head: %s', df.head(5))
+    cols_to_drop = df.filter(regex='_update$').columns
+    df = df.drop(columns=cols_to_drop)
+    return df
 
 def make_request_and_edit_query_until_success(object_name, fields, soql_function):
     query_string = soql_function(object_name, fields)
@@ -128,21 +206,27 @@ def query_most_recent_created_date_in_field(object_name, field):
 def calculate_most_recent_created_date_in_field(parsed_response):
     # if parsed_response['records'] has records, it should have a single record, because query was ORDER BY DESC and LIMIT 1.
     created_date = ''
-    dto = parsed_response.export_dto()
-    try:
-        assert len(dto['records']) <= 1
-    except AssertionError as e:
-        logger.error('More than one record returned for query: ' + dto['queryString'])
-    try:
-       created_date = dto['records'][0]['CreatedDate']
-       created_date = pd.to_datetime(created_date)
-    except IndexError as e:
-        pass
+    if parsed_response.get_record_count() > 0:
+        dto = parsed_response.export_dto()
+        try:
+            created_date = dto['records'][0]['CreatedDate']
+            created_date = pd.to_datetime(created_date)
+        except IndexError as e:
+            logger.info('No records returned for query: ' + dto['queryString'])
+        if created_date == '':
+            logger.info('No records returned for query: ' + dto['queryString'])
 
     return created_date
 
 
-def main():
+def main(save_test_fixtures=False):
+    """
+
+    :param save_test_fixtures:
+    :return:
+    """
+    if save_test_fixtures:
+        from tests.save_dataframes_as_fixtures_for_testing import save_test_fixture
     try:
         # Salesforce to Salesforce means we don't need standard objects. We can just use the custom objects.
         # Get the object ids and their names.
@@ -176,28 +260,40 @@ def main():
                 continue
             ## Counts of non-null field values
             # Get the record counts for all the fields associated to the object id. We can batch this aggregate, but the others need DataFrames.
-            dto_counts_of_non_null_field_values, final_fields = query_counts_of_non_null_field_values(object_name, fields) # Returns a data transfer object
-            if not dto_counts_of_non_null_field_values.is_error():
+            dto_counts_of_non_null_field_values, final_fields = query_counts_of_non_null_field_values(object_name, fields)  # Returns a data transfer object
+            if not dto_counts_of_non_null_field_values.is_error() and dto_counts_of_non_null_field_values.get_record_count() > 0:
                 # Send the Dto for processing count totals.
                 counts_of_non_null_field_values = calculate_counts_of_non_null_field_values(dto_counts_of_non_null_field_values, final_fields)
                 # Update the results to return.
                 if counts_of_non_null_field_values:
-                    final_datamap = save_datamap(final_datamap, object_id,  'CountOfNonNullValues', counts_of_non_null_field_values)
+                    df_count_values = create_dataframe_from_value_counts(counts_of_non_null_field_values)
+                    if save_test_fixtures:
+                        save_test_fixture(df_count_values, 'counts_of_non_null_field_values')
+                    final_datamap = merge_dataframes_for_datamap(final_datamap, df_count_values, object_id, ['CountOfNonNullValues'])
+                    final_datamap = save_datamap(final_datamap)
                     for field in fields:
                         ## Most common values per fields
                         most_common_values_in_field = query_most_common_values_in_field(object_name, field)
                         # Send the Dto for processing most common values.
-                        if most_common_values_in_field.is_error():
-                            continue
-                        most_common_values_in_field = calculate_most_common_values_in_field(most_common_values_in_field, field)
+                        if not most_common_values_in_field.is_error() and most_common_values_in_field.get_record_count() > 0:
+                            most_common_values_in_field = calculate_most_common_values_in_field(most_common_values_in_field, field)
+                            df_common_values = create_dataframe_from_common_values(field, object_id, most_common_values_in_field)
+                            if save_test_fixtures:
+                                save_test_fixture(df_common_values, 'most_common_field_values')
+                            final_datamap = merge_dataframes_for_datamap(final_datamap, df_common_values, object_id, df_common_values.filter(regex='^MostCommonValues[0-9](Count)?$').columns.tolist())
+                            final_datamap = save_datamap(final_datamap)
+                        else:
+                            logger.info('No common values found for field: %s', field)
                         ## Most recent created date per field
                         most_recent_created_date_in_field = query_most_recent_created_date_in_field(object_name, field) # Returns a data transfer object
-                        most_recent_created_date_in_field = calculate_most_recent_created_date_in_field(most_recent_created_date_in_field)
                         # Update the results to return.
-                        if most_common_values_in_field:
-                            final_datamap = save_datamap(final_datamap, object_id, 'MostCommonValues', most_common_values_in_field)
-                        if most_recent_created_date_in_field:
-                            final_datamap = save_datamap(final_datamap, object_id, 'DateOfLastValue', most_recent_created_date_in_field)
+                        if not most_recent_created_date_in_field.is_error() and most_recent_created_date_in_field.get_record_count() > 0:
+                            most_recent_created_date_in_field = calculate_most_recent_created_date_in_field(most_recent_created_date_in_field)
+                            df_recent_date = create_dataframe_from_recent_date(field, [most_recent_created_date_in_field])
+                            if save_test_fixtures:
+                                save_test_fixture(df_recent_date, 'most_recent_created_date')
+                            final_datamap = merge_dataframes_for_datamap(final_datamap, df_recent_date, object_id, ['DateOfLastValue'])
+                            final_datamap = save_datamap(final_datamap)
 
     except AttributeError as e:
         print(e)
