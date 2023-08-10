@@ -113,9 +113,10 @@ def merge_dataframes_for_field_mapping(df, to_merge, object_id):
     try:
         logger.debug('Testing merge')
         logger.debug(f'Main df head\n {to_merge.head(LIMIT)}')
-        logger.debug('TEST - .loc() %s', df.loc[df.loc[:, list(to_merge.columns.values)], list(to_merge.columns.values)].head(LIMIT))
+        logger.debug('TEST - .loc() %s', df.index.isin(to_merge.index).head(LIMIT))
         loc_df = df.copy()
-        loc_df.loc[loc_df.loc[:, loc_df.loc[(list(to_merge.columns.values))], list(to_merge.columns.values)]] = to_merge
+        condition = df.index.isin(to_merge.index)
+        loc_df.loc[condition, list(to_merge.columns.values)] = to_merge
         logger.debug('After .loc() %s', loc_df.loc[loc_df.loc[:, list(to_merge.columns.values)], list(to_merge.columns.values)])
         logger.debug('TEST - .merge() %s', pd.merge(df, to_merge, left_index=True, right_index=True, how='left'))
         left_outer_join = pd.merge(df, to_merge, left_index=True, right_index=True, how='left')
