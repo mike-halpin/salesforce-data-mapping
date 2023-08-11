@@ -7,6 +7,9 @@ Adapted from original source: https://github.com/github/gitignore/blob/main/Pyth
 *\.github
 *\.bak
 *\.vscode
+*\.json
+*\.pkl
+
 
 # sfdx
 sfdx-project.json

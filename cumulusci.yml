@@ -1,0 +1,25 @@
+minimum_cumulusci_version: '3.76.0'
+project:
+    name: datamap
+    package:
+        name: datamap
+        api_version: '58.0'
+    git:
+        default_branch: 'main'
+    source_format: sfdx
+
+tasks:
+    robot:
+        options:
+            suites: robot/datamap/tests
+            options:
+                outputdir: robot/datamap/results
+
+    robot_testdoc:
+        options:
+            path: robot/datamap/tests
+            output: robot/datamap/doc/datamap_tests.html
+
+    run_tests:
+        options:
+            required_org_code_coverage_percent: 75

@@ -1,6 +1,7 @@
 import os
 from dotenv import load_dotenv
-
+import salesforce.log_config as log_config
+logger = log_config.get_logger(__name__)
 ENVIRONMENT_VARIABLES_FILE_NAME = '.env'
 
 def load_environment_variables():
@@ -31,7 +32,7 @@ def get_salesforce_url():
     salesforce_domain = os.environ.get('SALESFORCE_DOMAIN') or ''
     if salesforce_domain == '':
         raise ValueError('SALESFORCE_DOMAIN environment variable not set')
-    log.info('Salesforce domain: ' + salesforce_domain)
+    logger.info('Salesforce domain: ' + salesforce_domain)
     return salesforce_domain
 
 def get_salesforce_username():

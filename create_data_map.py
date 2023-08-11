@@ -1,6 +1,7 @@
 import os
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from datetime import datetime
 import pandas as pd
 import salesforce.query as query
 import salesforce.soql as soql
@@ -89,77 +90,98 @@ def create_dataframe_from_value_counts(object_id, fields_and_values, axis1_name=
     updates_df = updates_df.rename(columns={0: axis1_name})
     return updates_df
 
-def save_datamap(df, save_index=False):
+def save_datamap(df, save_index=True):
     if df.shape[1] > 9:
         logger.debug('Trying to reproduce bug')
-    df.to_csv('data_map9A.csv', index=save_index)
+
+    df.to_csv(f'data_map_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv', index=save_index)
     return df
 
 
 def merge_dataframes_for_field_mapping(df, to_merge, object_id):
     og = df.copy()  # Stored for debugging
-    logger.debug('Original df head: %s', og.loc[object_id])
-    update_suffix = '_update'
+    update_suffix = '_right'
     # Merge the updates into the original DataFrame
-    df['SObjectId'] = df['SObjectId'].astype(str)
-    df['FieldName'] = df['FieldName'].astype(str)
-    df.set_index(['FieldName', 'SObjectId'], inplace=True)
-    to_merge['SObjectId'] = to_merge['SObjectId'].astype(str)
-    to_merge['FieldName'] = to_merge['FieldName'].astype(str)
-    to_merge.set_index(['FieldName', 'SObjectId'], inplace=True)
+    try:
+        df['SObjectId'] = df['SObjectId'].astype(str)
+        df['FieldName'] = df['FieldName'].astype(str)
+        df.set_index(['FieldName', 'SObjectId'], inplace=True)
+    except KeyError as e:
+        pass
+    try:
+        to_merge['SObjectId'] = to_merge['SObjectId'].astype(str)
+        to_merge['FieldName'] = to_merge['FieldName'].astype(str)
+        to_merge.set_index(['FieldName', 'SObjectId'], inplace=True)
+    except KeyError as e:
+        pass
     for col in to_merge.columns.difference(df.columns):  # Add any columns that don't exist in the original DataFrame
         logger.info(f'Adding column {col} to original DataFrame')
         df[col] = None
     try:
         logger.debug('Testing merge')
         logger.debug(f'Main df head\n {to_merge.head(LIMIT)}')
-        logger.debug('TEST - .loc() %s', df.index.isin(to_merge.index).head(LIMIT))
         loc_df = df.copy()
-        condition = df.index.isin(to_merge.index)
-        loc_df.loc[condition, list(to_merge.columns.values)] = to_merge
-        logger.debug('After .loc() %s', loc_df.loc[loc_df.loc[:, list(to_merge.columns.values)], list(to_merge.columns.values)])
-        logger.debug('TEST - .merge() %s', pd.merge(df, to_merge, left_index=True, right_index=True, how='left'))
-        left_outer_join = pd.merge(df, to_merge, left_index=True, right_index=True, how='left')
-        logger.debug('After .merge() %s',  left_outer_join.loc[left_outer_join.loc[:, list(to_merge.columns.values)], list(to_merge.columns.values)].head(LIMIT))
-        logger.debug('TEST - .join() %s', df.join(to_merge, how='left', lsuffix='', rsuffix='_update'))
-        df.update(to_merge)
-        logger.debug('After .join() %s', df.loc[df.loc[:, list(to_merge.columns.values)], list(to_merge.columns.values)].head(LIMIT))
+        """try:  # see if instead of chaining, we can use a pre checked condition?
+            condition = df.index.isin(to_merge.index)
+            loc_df.loc[condition, list(to_merge.columns.values)] = to_merge
+            logger.debug('AFTER - .loc() %s', loc_df.loc[:, list(to_merge.columns.values)])
+        except KeyError as e:
+            logger.error('FAIL .loc() %s', e)
+        try:
+            # logger.debug('TEST - .merge() %s', pd.merge(df, to_merge, left_index=True, right_index=True, how='left').head(LIMIT))
+            # left_outer_join = pd.merge(df, to_merge, left_index=True, right_index=True, how='left', suffixes=('', update_suffix))
+            # update_columns = [col for col in to_merge.columns if col in df.columns]
+            # left_outer_join[update_columns] = left_outer_join[update_columns].combine_first(to_merge[update_columns])
+            # logger.debug('After .merge() %s', left_outer_join.loc[::].head(LIMIT))
+        except KeyError as e:
+            logger.debug('FAIL - .merge() %s', e)
+        """
+        try:
+            logger.debug('TEST - .join() %s', df.join(to_merge, how='left', lsuffix='', rsuffix=update_suffix))
+            df.update(to_merge)
+            logger.debug('After .join() %s', df.loc[::].head(LIMIT))
+        except KeyError as e:
+            logger.debug('FAIL - .join() %s', e)
         logger.info('Merged updates into original DataFrame for object: %s', object_id)
-        #df = pd.merge(df, to_merge, on=['SObjectId', 'FieldName'], how='left', suffixes=('', update_suffix))
-        #try:
-        #    df[column] = df[column + update_suffix].where(df[column + update_suffix].notna(), df[column])
-        #    logger.info('Merged updates into original DataFrame for field: %s', column)
-        #except KeyError as e:
-        #    logger.debug(f'Nothing was merged, so column does not exist. {e}')
     except ValueError as e:
         logger.debug(f'Nothing was merged, so column does not exist. {e}')
     except pd.errors.MergeError as e:
         logger.error(f'Error merging updates into original DataFrame, {e}')
         logger.warning('Skipping this field. Final data map won\'t include it.')
 
-    cols_to_drop = df.filter(regex='_update$').columns
-    df = df.drop(columns=cols_to_drop)
+    # cols_to_drop = df.filter(regex=f'_?(update|[xy]|{update_suffix})$').columns
+    # df = df.drop(columns=cols_to_drop)
     return df
 
 def make_request_and_edit_query_until_success(object_name, fields, soql_function):
     query_string = soql_function(object_name, fields)
+    unsupported_fields = []
+    unsupported_objects = []
     retry_limit = len(fields) - 1
     parsed_response = query.run_query_using_requests(query_string)
     if parsed_response.is_error() and not parsed_response.is_object_error():
         while parsed_response.is_error() and retry_limit > 0 and not parsed_response.is_object_error():
             retry_limit -= 1
-            fields = query.removed_errored_fields(object_name, fields, parsed_response.export_dto()['errorMessage'], parsed_response.export_dto()['errorCode'])
+            fields, unsupported_fields = query.removed_errored_fields(object_name, fields, parsed_response.export_dto()['errorMessage'], parsed_response.export_dto()['errorCode'])
             parsed_response = query.run_query_using_requests(soql_function(object_name, fields))
+            if parsed_response.is_object_error():
+                logger.info('Object %s is not supported by Salesforce API', object_name)
+                unsupported_objects.append(object_name)
+            if parsed_response.is_field_error():
+                assert len(unsupported_fields) > 0
+                logger.info('Field %s is not supported by Salesforce API', fields)
     if parsed_response.is_error():
         logger.error('Error occurred while querying Salesforce API: %s', parsed_response.export_dto()['errorMessage'])
 
-    return parsed_response, fields
+    return parsed_response, fields, unsupported_fields, unsupported_objects
 
 def query_counts_of_non_null_field_values(object_name, fields):
     logger.debug('Querying counts of non-null field values for object %s', object_name)
     fields = list(set(fields))
     soql_function = soql.get_count_of_fields_values
-    return make_request_and_edit_query_until_success(object_name, fields, soql_function)
+    parsed_response, fields, unsupported_fields, unsupported_objects = make_request_and_edit_query_until_success(object_name, fields, soql_function)
+
+    return parsed_response, fields, unsupported_fields, unsupported_objects
 
 def query_count_of_non_null_field_values(object_name, field):
     """
@@ -269,7 +291,9 @@ def main(save_test_fixtures=False):
         # Merge the two dataframes together, so now we have object ids names and their fields.
         final_datamap = df_object_to_fields.merge(df_object_ids_to_object_names, on='SObjectId', how='left')
         # Set the finalmap index to SObject and Fieldname
-        final_datamap.set_index(['SObjectId', 'FieldName'], inplace=True)
+        final_datamap['SObjectId'] = final_datamap['SObjectId'].astype(str)
+        final_datamap['FieldName'] = final_datamap['FieldName'].astype(str)
+        final_datamap.set_index(['FieldName', 'SObjectId'], inplace=True)
         for object_id in list(set(object_to_fields.keys())):  # For each object Id...
             # Get the fields associated to the object id.
             df_unique_fields = df_object_to_fields  #
@@ -288,10 +312,30 @@ def main(save_test_fixtures=False):
             except KeyError as e:
                 logger.error('No object name found for object id: ' + str(object_id))
                 continue
-            for field in fields:
+            with open('blacklisted_fields_for_aggregates.csv', 'r') as f:
+                    try:
+                        blacklisted_fields = pd.read_csv(f).iloc[:,1].to_list()
+                    except pd.errors.EmptyDataError as e:
+                        blacklisted_fields = []
+            filtered_fields = [field for field in fields if field not in blacklisted_fields]
+            for field in filtered_fields:
+                if field in blacklisted_fields:
+                    continue
                 ## Counts of non-null field values
                 # Get the record counts for all the fields associated to the object id. We can batch this aggregate, but the others need DataFrames.
-                dto_counts_of_non_null_field_values, final_fields = query_counts_of_non_null_field_values(object_name, [field])  # Returns a data transfer object
+                dto_counts_of_non_null_field_values, final_fields, names_of_unsupported_fields, names_of_unsupported_objects = query_counts_of_non_null_field_values(object_name, [field])  # Returns a data transfer object
+                # try:
+                #    assert len(final_fields) == len(filtered_fields)
+                # except AssertionError as e:
+                #    assert len(final_fields) < len(filtered_fields)
+                #    assert len(removed_fields) > 0
+                #    assert (len(final_fields) + len(removed_fields)) == len(filtered_fields)
+                logger.info(f'Object: {object_name}, Field: {field}, Removed Fields: {names_of_unsupported_fields}')
+                with open('blacklisted_fields_for_aggregates.csv', 'a') as f:
+                    for removed_field in names_of_unsupported_fields:
+                        f.write(f'{object_id},{removed_field}\n')
+                    for removed_object in names_of_unsupported_objects:
+                        f.write(f'{object_id},{removed_object}\n')
                 if not dto_counts_of_non_null_field_values.is_error() and dto_counts_of_non_null_field_values.get_record_count() > 0:
                     # Send the Dto for processing count totals.
                     counts_of_non_null_field_values = calculate_counts_of_non_null_field_values(dto_counts_of_non_null_field_values, final_fields)
